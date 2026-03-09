@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: smartdoc-ai
+    runtime: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn app:app"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: smartdoc-db
+          property: connectionString
+      - key: API_KEY
+        sync: false

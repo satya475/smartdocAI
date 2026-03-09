@@ -1,0 +1,15 @@
+Flask
+gunicorn
+psycopg2-binary
+SQLAlchemy
+python-dotenv
+Werkzeug
+pandas
+matplotlib
+numpy
+qrcode
+pillow
+PyPDF2
+pytesseract
+opencv-python-headless
+requests
