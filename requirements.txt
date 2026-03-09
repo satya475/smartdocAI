@@ -1,7 +1,7 @@
 Flask
+Flask-SQLAlchemy
 gunicorn
 psycopg2-binary
-SQLAlchemy
 python-dotenv
 Werkzeug
 pandas
