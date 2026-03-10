@@ -313,18 +313,30 @@ def plot_equation():
 
     if request.method == "POST":
 
-        equation = request.form["equation"]
-        x_start = float(request.form["x_start"])
-        x_end = float(request.form["x_end"])
-
-        x = np.linspace(x_start, x_end, 400)
-
         try:
+            equation = request.form.get("equation", "")
+            x_start = float(request.form.get("x_start", -10))
+            x_end = float(request.form.get("x_end", 10))
 
-            y = eval(equation)
+            x = np.linspace(x_start, x_end, 400)
+
+            # Safe math environment
+            safe_dict = {
+                "x": x,
+                "np": np,
+                "sin": np.sin,
+                "cos": np.cos,
+                "tan": np.tan,
+                "log": np.log,
+                "exp": np.exp
+            }
+
+            y = eval(equation, {"__builtins__": None}, safe_dict)
 
             plt.figure()
             plt.plot(x, y)
+            plt.title(f"y = {equation}")
+            plt.grid(True)
 
             buf = io.BytesIO()
             plt.savefig(buf, format="png")
@@ -332,8 +344,10 @@ def plot_equation():
 
             plot_url = base64.b64encode(buf.getvalue()).decode()
 
-        except:
-            flash("Invalid equation")
+            plt.close()
+
+        except Exception as e:
+            flash("Invalid equation. Example: sin(x) or x**2")
 
     return render_template(
         "plot_equation.html",
