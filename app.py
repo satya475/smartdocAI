@@ -1,9 +1,8 @@
 import os
 import io
 import base64
-import qrcode
 import numpy as np
-import pandas as pd
+import qrcode
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -11,56 +10,66 @@ import matplotlib.pyplot as plt
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
-from dotenv import load_dotenv
 from PyPDF2 import PdfReader
 
-load_dotenv()
+# ------------------------------------------------
+# FLASK CONFIG
+# ------------------------------------------------
 
 app = Flask(__name__)
 
-app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "devkey")
-app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret")
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"pool_pre_ping": True}
 
 db = SQLAlchemy(app)
-
-with app.app_context():
-    db.create_all()
 
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-
-# -----------------------------
+# ------------------------------------------------
 # DATABASE MODELS
-# -----------------------------
+# ------------------------------------------------
 
 class User(db.Model):
+    __tablename__ = "users"
+
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True)
+    username = db.Column(db.String(100), unique=True)
     email = db.Column(db.String(120), unique=True)
     password = db.Column(db.String(200))
 
 
 class Upload(db.Model):
+    __tablename__ = "uploads"
+
     id = db.Column(db.Integer, primary_key=True)
     filename = db.Column(db.String(200))
     upload_time = db.Column(db.DateTime, server_default=db.func.now())
     user_id = db.Column(db.Integer)
 
 
-# -----------------------------
+with app.app_context():
+    db.create_all()
+
+# ------------------------------------------------
 # INDEX
-# -----------------------------
+# ------------------------------------------------
 
 @app.route("/")
 def index():
     return render_template("index.html")
 
 
-# -----------------------------
-# AUTH
-# -----------------------------
+# ------------------------------------------------
+# AUTHENTICATION
+# ------------------------------------------------
 
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
@@ -70,6 +79,10 @@ def signup():
         username = request.form["username"]
         email = request.form["email"]
         password = generate_password_hash(request.form["password"])
+
+        if User.query.filter_by(username=username).first():
+            flash("Username already exists")
+            return redirect(url_for("signup"))
 
         user = User(username=username, email=email, password=password)
 
@@ -110,9 +123,9 @@ def logout():
     return redirect(url_for("index"))
 
 
-# -----------------------------
+# ------------------------------------------------
 # DASHBOARD
-# -----------------------------
+# ------------------------------------------------
 
 @app.route("/dashboard")
 def dashboard():
@@ -141,9 +154,9 @@ def my_account():
     )
 
 
-# -----------------------------
-# HISTORY
-# -----------------------------
+# ------------------------------------------------
+# UPLOAD HISTORY
+# ------------------------------------------------
 
 @app.route("/upload_history")
 def upload_history():
@@ -151,14 +164,17 @@ def upload_history():
     if "user_id" not in session:
         return redirect(url_for("login"))
 
-    uploads = Upload.query.filter_by(user_id=session["user_id"]).all()
+    try:
+        uploads = Upload.query.filter_by(user_id=session["user_id"]).all()
+    except:
+        uploads = []
 
     return render_template("history.html", uploads=uploads)
 
 
-# -----------------------------
+# ------------------------------------------------
 # PDF CHAT
-# -----------------------------
+# ------------------------------------------------
 
 @app.route("/pdf_chat", methods=["GET", "POST"])
 def pdf_chat():
@@ -166,33 +182,51 @@ def pdf_chat():
     extracted_text = ""
     summary = ""
     answer = ""
+    action = None
 
     if request.method == "POST":
 
-        pdf = request.files.get("pdf")
-
-        if pdf:
-            reader = PdfReader(pdf)
-
-            for page in reader.pages:
-                text = page.extract_text()
-                if text:
-                    extracted_text += text
-
         action = request.form.get("action")
 
-        if action == "summarize":
-            summary = extracted_text[:1500]  # simple summary placeholder
+        if action == "extract":
 
-        if action == "ask":
+            pdf = request.files.get("pdf")
+
+            if pdf:
+
+                reader = PdfReader(pdf)
+
+                for page in reader.pages:
+                    text = page.extract_text()
+                    if text:
+                        extracted_text += text
+
+                if "user_id" in session:
+                    upload = Upload(
+                        filename=pdf.filename,
+                        user_id=session["user_id"]
+                    )
+                    db.session.add(upload)
+                    db.session.commit()
+
+        elif action == "summarize":
+
+            extracted_text = request.form.get("extracted_text", "")
+            summary = extracted_text[:1500]
+
+        elif action == "ask":
+
+            extracted_text = request.form.get("extracted_text", "")
             question = request.form.get("question")
+
             answer = f"Question received: {question}"
 
     return render_template(
         "pdf_chat.html",
         extracted_text=extracted_text,
         summary=summary,
-        answer=answer
+        answer=answer,
+        action=action
     )
 
 
@@ -201,9 +235,47 @@ def clear_pdf_session():
     return redirect(url_for("pdf_chat"))
 
 
-# -----------------------------
-# OCR
-# -----------------------------
+# ------------------------------------------------
+# QR GENERATOR
+# ------------------------------------------------
+
+@app.route("/text_to_qr", methods=["GET", "POST"])
+def text_to_qr():
+
+    qr_image = None
+    qr_filename = None
+
+    if request.method == "POST":
+
+        text = request.form.get("text", "")
+
+        try:
+
+            if len(text) > 2000:
+                flash("Text too long for QR code")
+                return render_template("qr_generator.html")
+
+            img = qrcode.make(text)
+
+            buffer = io.BytesIO()
+            img.save(buffer, format="PNG")
+
+            qr_image = base64.b64encode(buffer.getvalue()).decode()
+            qr_filename = "qr.png"
+
+        except:
+            flash("QR generation failed")
+
+    return render_template(
+        "qr_generator.html",
+        qr_image=qr_image,
+        qr_filename=qr_filename
+    )
+
+
+# ------------------------------------------------
+# OCR PAGE
+# ------------------------------------------------
 
 @app.route("/ocr_extract", methods=["GET", "POST"])
 def ocr_extract():
@@ -214,11 +286,12 @@ def ocr_extract():
 
     if request.method == "POST":
 
-        file = request.files["file"]
+        file = request.files.get("file")
 
         if file:
             filepath = os.path.join(UPLOAD_FOLDER, file.filename)
             file.save(filepath)
+
             raw_text = "OCR placeholder text"
 
     return render_template(
@@ -229,38 +302,9 @@ def ocr_extract():
     )
 
 
-# -----------------------------
-# QR GENERATOR
-# -----------------------------
-
-@app.route("/text_to_qr", methods=["GET", "POST"])
-def text_to_qr():
-
-    qr_image = None
-    qr_filename = None
-
-    if request.method == "POST":
-
-        text = request.form["text"]
-
-        img = qrcode.make(text)
-
-        buffer = io.BytesIO()
-        img.save(buffer, format="PNG")
-
-        qr_image = base64.b64encode(buffer.getvalue()).decode()
-        qr_filename = "qr.png"
-
-    return render_template(
-        "qr_generator.html",
-        qr_image=qr_image,
-        qr_filename=qr_filename
-    )
-
-
-# -----------------------------
+# ------------------------------------------------
 # EQUATION PLOT
-# -----------------------------
+# ------------------------------------------------
 
 @app.route("/plot_equation", methods=["GET", "POST"])
 def plot_equation():
@@ -276,6 +320,7 @@ def plot_equation():
         x = np.linspace(x_start, x_end, 400)
 
         try:
+
             y = eval(equation)
 
             plt.figure()
@@ -296,53 +341,53 @@ def plot_equation():
     )
 
 
-# -----------------------------
-# PLOTSPAN ROUTES
-# -----------------------------
+# ------------------------------------------------
+# PLOTSPAN PAGES
+# ------------------------------------------------
 
 @app.route("/plotspan_choice")
 def plotspan_choice():
     return render_template("plotspan_choice.html")
 
 
-@app.route("/step1_upload")
+@app.route("/step1_upload", methods=["GET", "POST"])
 def step1_upload():
     return render_template("plot_step1_upload.html")
 
 
-@app.route("/step2_chart")
+@app.route("/step2_chart", methods=["GET", "POST"])
 def step2_chart():
     return render_template("plot_step2_chart.html")
 
 
-@app.route("/step3_select")
+@app.route("/step3_select", methods=["GET", "POST"])
 def step3_select():
     return render_template("plot_step3_select.html")
 
 
-# -----------------------------
-# EQUATION SOLVER RESULT PAGE
-# -----------------------------
+# ------------------------------------------------
+# EQUATION SOLVER RESULT
+# ------------------------------------------------
 
 @app.route("/solve_equation", methods=["POST"])
 def solve_equation():
 
     eq = request.form["solve_equation"]
-
     result = f"Equation received: {eq}"
 
     return render_template("solve_result.html", result=result)
 
 
-# -----------------------------
-# START SERVER
-# -----------------------------
+# ------------------------------------------------
+# RUN APP (FOR LOCAL)
+# ------------------------------------------------
 
 if __name__ == "__main__":
 
-    with app.app_context():
-        db.create_all()
-
     port = int(os.environ.get("PORT", 5000))
 
-    app.run(host="0.0.0.0", port=port)
+    app.run(
+        host="0.0.0.0",
+        port=port,
+        debug=True
+    )
