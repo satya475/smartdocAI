@@ -314,13 +314,11 @@ def plot_equation():
     if request.method == "POST":
 
         try:
-            equations = request.form.get("equation", "")
+            equation = request.form.get("equation", "x")
             x_start = float(request.form.get("x_start", -10))
             x_end = float(request.form.get("x_end", 10))
 
             x = np.linspace(x_start, x_end, 400)
-
-            eq_list = [eq.strip() for eq in equations.split(";")]
 
             safe_dict = {
                 "x": x,
@@ -332,32 +330,28 @@ def plot_equation():
                 "exp": np.exp
             }
 
-            plt.figure()
+            y = eval(equation, {"__builtins__": None}, safe_dict)
 
-            for eq in eq_list:
-                y = eval(eq, {"__builtins__": None}, safe_dict)
-                plt.plot(x, y, label=eq)
-
-            plt.legend()
-            plt.title("Equation Plot")
-            plt.grid(True)
+            fig, ax = plt.subplots()
+            ax.plot(x, y)
+            ax.set_title(f"y = {equation}")
+            ax.grid(True)
 
             buf = io.BytesIO()
-            plt.savefig(buf, format="png")
+            fig.savefig(buf, format="png")
             buf.seek(0)
 
             plot_url = base64.b64encode(buf.getvalue()).decode()
 
-            plt.close()
+            plt.close(fig)
 
-        except Exception:
-            flash("Invalid equation format. Example: sin(x); x**2; cos(x)")
+        except Exception as e:
+            flash("Invalid equation")
 
     return render_template(
         "plot_equation.html",
         plot_url=plot_url
     )
-
 
 # ------------------------------------------------
 # PLOTSPAN PAGES
