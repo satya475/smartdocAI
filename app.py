@@ -310,9 +310,7 @@ def plot_equation():
     if request.method == "POST":
 
         try:
-
-            equation = request.form.get("equation", "x")
-            session["last_equation"] = equation
+            equations = request.form.get("equation", "x")
 
             x_start = float(request.form.get("x_start", -10))
             x_end = float(request.form.get("x_end", 10))
@@ -329,10 +327,15 @@ def plot_equation():
                 "exp": np.exp
             }
 
-            y = eval(equation, {"__builtins__": None}, safe_dict)
+            eq_list = [eq.strip() for eq in equations.split(";")]
 
             fig, ax = plt.subplots()
-            ax.plot(x, y)
+
+            for eq in eq_list:
+                y = eval(eq, {"__builtins__": None}, safe_dict)
+                ax.plot(x, y, label=eq)
+
+            ax.legend()
             ax.grid(True)
 
             buf = io.BytesIO()
@@ -343,14 +346,13 @@ def plot_equation():
 
             plt.close(fig)
 
-        except:
-            flash("Invalid equation")
+        except Exception:
+            flash("Invalid equation format. Example: sin(x); cos(x)")
 
     return render_template(
         "plot_equation.html",
         plot_url=plot_url
     )
-
 
 @app.route("/download_equation_plot")
 def download_equation_plot():
