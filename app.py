@@ -315,6 +315,9 @@ def plot_equation():
             x_start = float(request.form.get("x_start", -10))
             x_end = float(request.form.get("x_end", 10))
 
+            y_start = float(request.form.get("y_start", -10))
+            y_end = float(request.form.get("y_end", 10))
+
             x = np.linspace(x_start, x_end, 400)
 
             safe_dict = {
@@ -335,8 +338,17 @@ def plot_equation():
                 y = eval(eq, {"__builtins__": None}, safe_dict)
                 ax.plot(x, y, label=eq)
 
+            # Apply axis limits
+            ax.set_xlim(x_start, x_end)
+            ax.set_ylim(y_start, y_end)
+
+            # Axis lines
+            ax.axhline(0)
+            ax.axvline(0)
+
             ax.legend()
             ax.grid(True)
+            ax.set_title("Equation Plot")
 
             buf = io.BytesIO()
             fig.savefig(buf, format="png")
@@ -347,13 +359,12 @@ def plot_equation():
             plt.close(fig)
 
         except Exception:
-            flash("Invalid equation format. Example: sin(x); cos(x)")
+            flash("Invalid equation format. Example: sin(x); cos(x); x**2")
 
     return render_template(
         "plot_equation.html",
         plot_url=plot_url
     )
-
 @app.route("/download_equation_plot")
 def download_equation_plot():
 
