@@ -1,4 +1,6 @@
 import os
+os.environ["MPLCONFIGDIR"] = "/tmp"
+
 import io
 import base64
 import numpy as np
@@ -7,7 +9,11 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask import (
+    Flask, render_template, request, redirect,
+    url_for, session, flash, send_file
+)
+
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from PyPDF2 import PdfReader
@@ -17,10 +23,10 @@ from PyPDF2 import PdfReader
 # ------------------------------------------------
 
 app = Flask(__name__)
-
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret")
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
+
 if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -164,10 +170,7 @@ def upload_history():
     if "user_id" not in session:
         return redirect(url_for("login"))
 
-    try:
-        uploads = Upload.query.filter_by(user_id=session["user_id"]).all()
-    except:
-        uploads = []
+    uploads = Upload.query.filter_by(user_id=session["user_id"]).all()
 
     return render_template("history.html", uploads=uploads)
 
@@ -243,7 +246,6 @@ def clear_pdf_session():
 def text_to_qr():
 
     qr_image = None
-    qr_filename = None
 
     if request.method == "POST":
 
@@ -251,25 +253,19 @@ def text_to_qr():
 
         try:
 
-            if len(text) > 2000:
-                flash("Text too long for QR code")
-                return render_template("qr_generator.html")
-
             img = qrcode.make(text)
 
             buffer = io.BytesIO()
             img.save(buffer, format="PNG")
 
             qr_image = base64.b64encode(buffer.getvalue()).decode()
-            qr_filename = "qr.png"
 
         except:
             flash("QR generation failed")
 
     return render_template(
         "qr_generator.html",
-        qr_image=qr_image,
-        qr_filename=qr_filename
+        qr_image=qr_image
     )
 
 
@@ -314,7 +310,10 @@ def plot_equation():
     if request.method == "POST":
 
         try:
+
             equation = request.form.get("equation", "x")
+            session["last_equation"] = equation
+
             x_start = float(request.form.get("x_start", -10))
             x_end = float(request.form.get("x_end", 10))
 
@@ -334,7 +333,6 @@ def plot_equation():
 
             fig, ax = plt.subplots()
             ax.plot(x, y)
-            ax.set_title(f"y = {equation}")
             ax.grid(True)
 
             buf = io.BytesIO()
@@ -345,13 +343,51 @@ def plot_equation():
 
             plt.close(fig)
 
-        except Exception as e:
+        except:
             flash("Invalid equation")
 
     return render_template(
         "plot_equation.html",
         plot_url=plot_url
     )
+
+
+@app.route("/download_equation_plot")
+def download_equation_plot():
+
+    equation = session.get("last_equation", "x")
+
+    x = np.linspace(-10, 10, 400)
+
+    safe_dict = {
+        "x": x,
+        "np": np,
+        "sin": np.sin,
+        "cos": np.cos,
+        "tan": np.tan,
+        "log": np.log,
+        "exp": np.exp
+    }
+
+    y = eval(equation, {"__builtins__": None}, safe_dict)
+
+    fig, ax = plt.subplots()
+    ax.plot(x, y)
+    ax.grid(True)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png")
+    buf.seek(0)
+
+    plt.close(fig)
+
+    return send_file(
+        buf,
+        mimetype="image/png",
+        as_attachment=True,
+        download_name="equation_plot.png"
+    )
+
 
 # ------------------------------------------------
 # PLOTSPAN PAGES
@@ -378,20 +414,21 @@ def step3_select():
 
 
 # ------------------------------------------------
-# EQUATION SOLVER RESULT
+# SOLVER RESULT
 # ------------------------------------------------
 
 @app.route("/solve_equation", methods=["POST"])
 def solve_equation():
 
     eq = request.form["solve_equation"]
+
     result = f"Equation received: {eq}"
 
     return render_template("solve_result.html", result=result)
 
 
 # ------------------------------------------------
-# RUN APP (FOR LOCAL)
+# RUN LOCAL
 # ------------------------------------------------
 
 if __name__ == "__main__":
