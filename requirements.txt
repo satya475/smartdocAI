@@ -1,15 +1,29 @@
+# Web & Database
 Flask
 Flask-SQLAlchemy
 gunicorn
 psycopg2-binary
 python-dotenv
 Werkzeug
+
+# Data & Plotting
 pandas
 matplotlib
 numpy
+openpyxl
+
+# Utilities
 qrcode
 pillow
 PyPDF2
+requests
+sympy
+
+# OCR (Note: Requires Tesseract binary on the OS)
 pytesseract
 opencv-python-headless
-requests
+
+# AI/ML (Warning: These may exceed Render Free Tier RAM)
+# torch
+# sentence-transformers
+# faiss-cpu
